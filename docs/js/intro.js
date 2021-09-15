@@ -172,13 +172,8 @@ window.addEventListener('load', showBanners);
 // Model selection dropdown
 $('#select-model').addEventListener('change', showImage);
 $('#select-model').addEventListener('change', resetOnNewImage);
-$('#select-model').addEventListener('change', resetAttack);
+//$('#select-model').addEventListener('change', resetAttack);
 $('#select-model').addEventListener('change', removeLeftOverlay);
-
-// Next image button
-$('#next-image').addEventListener('click', showNextImage);
-$('#next-image').addEventListener('click', resetOnNewImage);
-$('#next-image').addEventListener('click', resetAttack);
 
 // Predict button (original image)
 $('#predict-original').addEventListener('click', predict);
@@ -215,10 +210,10 @@ function updateImage() {
   let fr = new FileReader();
   fr.onload = function() {
     $('original').src = fr.result;
-    image.src = fr.result;
   }
   fr.readAsDataURL($('image-selector'))
   image.onload = () => {
+    image.src = im;
     tensorImage = tf.browser.fromPixels(im)
   }
 }
