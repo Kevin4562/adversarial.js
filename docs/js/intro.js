@@ -211,7 +211,7 @@ function updateImage() {
   fr.onload = function() {
     $('original').src = fr.result;
   }
-  fr.readAsDataURL($('image-selector'))
+  fr.readAsDataURL($('image-selector').files[0])
   image.onload = () => {
     image.src = im;
     tensorImage = tf.browser.fromPixels(im)
