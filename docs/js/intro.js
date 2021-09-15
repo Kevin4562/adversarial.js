@@ -201,9 +201,27 @@ $('#predict-adv').addEventListener('click', predictAdv);
 $('#view-noise').addEventListener('click', viewNoise);
 $('#view-image').addEventListener('click', viewImage);
 
+$('#image-selector').addEventListener('change', updateImage);
+
+
+
 /************************************************************************
 * Define Event Handlers
 ************************************************************************/
+
+let tensorImage;
+function updateImage() {
+  let image = new Image();
+  let fr = new FileReader();
+  fr.onload = function() {
+    $('original').src = fr.result;
+    image.src = fr.result;
+  }
+  fr.readAsDataURL($('image-selector'))
+  image.onload = () => {
+    tensorImage = tf.browser.fromPixels(im)
+  }
+}
 
 /**
  * Renders the next image from the sample dataset in the original canvas
@@ -289,6 +307,7 @@ async function generateAdv() {
 
   let modelName = $('#select-model').value;
   let targetLblIdx = parseInt($('#select-target').value);
+
   if (modelName === 'mnist') {
     await loadMnistModel();
     await loadingMnist;
