@@ -38,16 +38,6 @@ const IMAGENET_CONFIGS = {
 /****************************** Load MNIST ******************************/
 
 let mnistDataset;
-let mnistUrl = 'data/mnist/mnist_sample.csv';
-let loadingMnist = tf.data.csv(mnistUrl, {columnConfigs: {label: {isLabel: true}}})
-  .map(({xs, ys}) => {
-    xs = Object.values(xs).map(e => e/255);  // Convert from feature object to array, and normalize
-    ys = tf.oneHot(Object.values(ys), 10).squeeze();  // Convert from feature object to scalar, and turn into one-hot vector
-    return {xs: xs, ys: ys};
-  })
-  .batch(1)
-  .toArray()
-  .then(ds => mnistDataset = ds);
 
 /****************************** Load CIFAR-10 ******************************/
 
@@ -165,19 +155,17 @@ async function loadImagenetModel() {
 ************************************************************************/
 
 // On page load
-window.addEventListener('load', showImage);
 window.addEventListener('load', resetAvailableAttacks);
 window.addEventListener('load', showBanners);
 
 // Model selection dropdown
-$('#select-model').addEventListener('change', showImage);
+$('#select-model').addEventListener('change', removeLeftOverlay);
 $('#select-model').addEventListener('change', resetOnNewImage);
 //$('#select-model').addEventListener('change', resetAttack);
 $('#select-model').addEventListener('change', removeLeftOverlay);
 
 // Predict button (original image)
 $('#predict-original').addEventListener('click', predict);
-$('#predict-original').addEventListener('click', removeTopRightOverlay);
 
 // Target label dropdown
 $('#select-target').addEventListener('change', resetAttack);
@@ -209,78 +197,65 @@ function updateImage() {
   let image = new Image();
   let fr = new FileReader();
   fr.onload = function() {
-    $('original').src = fr.result;
+    image.src = fr.result;
   }
   fr.readAsDataURL($('#image-selector').files[0])
   image.onload = () => {
-    image.src = im;
-    tensorImage = tf.browser.fromPixels(im)
+    tensorImage = tf.browser.fromPixels(image).div(255.0);
+    console.log(tensorImage);
+    let modelName = $('#select-model').value;
+    if (modelName === 'mnist') {
+      tensorImage = tf.reshape(tensorImage.resizeNearestNeighbor([16, 16]), [-1]);
+      tensorImage = tensorImage.reshape([1, 784]);
+    } else if (modelName === 'cifar') {
+      tensorImage = tensorImage.resizeNearestNeighbor([32, 32]).reshape([1, 32, 32, 3]);
+    } else if (modelName === 'gtsrb') {
+      tensorImage = tensorImage.resizeNearestNeighbor([64, 64]).reshape([1, 64, 64, 3]);
+    } else if (modelName === 'imagenet') {
+      tensorImage = tensorImage.reshape([1, 224, 224, 3]);
+    }
+    drawImg(tensorImage, 'original');
   }
-}
-
-/**
- * Renders the next image from the sample dataset in the original canvas
- */
-function showNextImage() {
-  let modelName = $('#select-model').value;
-  if (modelName === 'mnist') { showNextMnist(); }
-  else if (modelName === 'cifar') { showNextCifar(); }
-  else if (modelName === 'gtsrb') { showNextGtsrb(); }
-  else if (modelName === 'imagenet') { showNextImagenet(); }
-}
-
-/**
- * Renders the current image from the sample dataset in the original canvas
- */
-function showImage() {
-  let modelName = $('#select-model').value;
-  if (modelName === 'mnist') { showMnist(); }
-  else if (modelName === 'cifar') { showCifar(); }
-  else if (modelName === 'gtsrb') { showGtsrb(); }
-  else if (modelName === 'imagenet') { showImagenet(); }
 }
 
 /**
  * Computes & displays prediction of the current original image
  */
 async function predict() {
-  $('#predict-original').disabled = true;
-  $('#predict-original').innerText = 'Loading...';
-
-  let modelName = $('#select-model').value;
-  if (modelName === 'mnist') {
-    await loadMnistModel();
-    await loadingMnist;
-    let lblIdx = mnistDataset[mnistIdx].ys.argMax(1).dataSync()[0];
-    _predict(mnistModel, mnistDataset[mnistIdx].xs, lblIdx, MNIST_CLASSES);
-  } else if (modelName === 'cifar') {
-    await loadCifarModel();
-    await loadingCifar;
-    let lblIdx = cifarDataset[cifarIdx].ys.argMax(1).dataSync()[0];
-    _predict(cifarModel, cifarDataset[cifarIdx].xs, lblIdx, CIFAR_CLASSES);
-  } else if (modelName === 'gtsrb') {
-    await loadGtsrbModel();
-    await loadingGtsrb;
-    let lblIdx = gtsrbDataset[gtsrbIdx].ys.argMax(1).dataSync()[0];
-    _predict(gtsrbModel, gtsrbDataset[gtsrbIdx].xs, lblIdx, GTSRB_CLASSES);
-  } else if (modelName === 'imagenet') {
-    await loadImagenetModel();
-    await loadedImagenetData;
-    _predict(imagenetModel, imagenetX[imagenetIdx], imagenetYLbls[imagenetIdx], IMAGENET_CLASSES);
+  if ($('#image-selector').value != '') {
+    $('#predict-original').disabled = true;
+    $('#predict-original').innerText = 'Loading...';
+  
+    let modelName = $('#select-model').value;
+    if (modelName === 'mnist') {
+      await loadMnistModel();
+      _predict(mnistModel, tensorImage, MNIST_CLASSES);
+    } else if (modelName === 'cifar') {
+      await loadCifarModel();
+      _predict(cifarModel, tensorImage, CIFAR_CLASSES);
+    } else if (modelName === 'gtsrb') {
+      await loadGtsrbModel();
+      _predict(gtsrbModel, tensorImage, GTSRB_CLASSES);
+    } else if (modelName === 'imagenet') {
+      await loadImagenetModel();
+      _predict(imagenetModel, tensorImage, IMAGENET_CLASSES);
+    }
+  
+    $('#predict-original').innerText = 'Run Neural Network';
+  
+    function _predict(model, img, CLASS_NAMES) {
+      // Generate prediction
+      let pred = model.predict(img);
+      let predLblIdx = pred.argMax(1).dataSync()[0];
+      let predProb = pred.max().dataSync()[0];
+  
+      showPrediction(`Prediction: "${CLASS_NAMES[predLblIdx]}"<br/>Probability: ${(predProb * 100).toFixed(2)}%`);
+      removeTopRightOverlay();
+    }
+  } else {
+    alert('No image selected.')
   }
 
-  $('#predict-original').innerText = 'Run Neural Network';
-
-  function _predict(model, img, lblIdx, CLASS_NAMES) {
-    // Generate prediction
-    let pred = model.predict(img);
-    let predLblIdx = pred.argMax(1).dataSync()[0];
-    let predProb = pred.max().dataSync()[0];
-
-    // Display prediction
-    let status = {msg: '✅ Prediction is correct.', statusClass: 'status-green'};  // Predictions on the sample should always be correct
-    showPrediction(`Prediction: "${CLASS_NAMES[predLblIdx]}"<br/>Probability: ${(predProb * 100).toFixed(2)}%`, status);
-  }
  }
 
 /**
@@ -305,20 +280,20 @@ async function generateAdv() {
 
   if (modelName === 'mnist') {
     await loadMnistModel();
-    await loadingMnist;
-    await _generateAdv(mnistModel, mnistDataset[mnistIdx].xs, mnistDataset[mnistIdx].ys, MNIST_CLASSES, MNIST_CONFIGS[attack.name]);
+    //await loadingMnist;
+    await _generateAdv(mnistModel, tensorImage, MNIST_CLASSES, MNIST_CONFIGS[attack.name]);
   } else if (modelName === 'cifar') {
     await loadCifarModel();
-    await loadingCifar;
-    await _generateAdv(cifarModel, cifarDataset[cifarIdx].xs, cifarDataset[cifarIdx].ys, CIFAR_CLASSES, CIFAR_CONFIGS[attack.name]);
+    //await loadingCifar;
+    await _generateAdv(cifarModel, tensorImage, CIFAR_CLASSES, CIFAR_CONFIGS[attack.name]);
   } else if (modelName === 'gtsrb') {
     await loadGtsrbModel();
-    await loadingGtsrb;
-    await _generateAdv(gtsrbModel, gtsrbDataset[gtsrbIdx].xs, gtsrbDataset[gtsrbIdx].ys, GTSRB_CLASSES, GTSRB_CONFIGS[attack.name]);
+    //await loadingGtsrb;
+    await _generateAdv(gtsrbModel, tensorImage, GTSRB_CLASSES, GTSRB_CONFIGS[attack.name]);
   } else if (modelName === 'imagenet') {
     await loadImagenetModel();
-    await loadedImagenetData;
-    await _generateAdv(imagenetModel, imagenetX[imagenetIdx], imagenetY[imagenetIdx], IMAGENET_CLASSES, IMAGENET_CONFIGS[attack.name]);
+    //await loadedImagenetData;
+    await _generateAdv(imagenetModel, tensorImage, IMAGENET_CLASSES, IMAGENET_CONFIGS[attack.name]);
   }
 
   $('#latency-msg').style.display = 'none';
@@ -326,10 +301,11 @@ async function generateAdv() {
   $('#predict-adv').innerText = 'Run Neural Network';
   $('#predict-adv').disabled = false;
 
-  async function _generateAdv(model, img, lbl, CLASS_NAMES, CONFIG) {
+  async function _generateAdv(model, img, CLASS_NAMES, CONFIG) {
+    let classCount = Object.keys(CLASS_NAMES).length;
     // Generate adversarial example
-    let targetLbl = tf.oneHot(targetLblIdx, lbl.shape[1]).reshape(lbl.shape);
-    let aimg = tf.tidy(() => attack(model, img, lbl, targetLbl, CONFIG));
+    let targetLbl = tf.oneHot(targetLblIdx, classCount).reshape([1, classCount]);
+    let aimg = tf.tidy(() => attack(model, img, 0, targetLbl, CONFIG));
 
     // Display adversarial example
     $('#difference').style.display = 'block';
@@ -340,16 +316,6 @@ async function generateAdv() {
     let predLblIdx = pred.argMax(1).dataSync()[0];
     let predProb = pred.max().dataSync()[0];
     advPrediction = `Prediction: "${CLASS_NAMES[predLblIdx]}"<br/>Probability: ${(predProb * 100).toFixed(2)}%`;
-
-    // Compute & store attack success/failure message
-    let lblIdx = lbl.argMax(1).dataSync()[0];
-    if (predLblIdx === targetLblIdx) {
-      advStatus = {msg: '❌ Prediction is wrong. Attack succeeded!', statusClass: 'status-red'};
-    } else if (predLblIdx !== lblIdx) {
-      advStatus = {msg: '❌ Prediction is wrong. Attack partially succeeded!', statusClass: 'status-orange'};
-    } else {
-      advStatus = {msg: '✅ Prediction is still correct. Attack failed.', statusClass: 'status-green'};
-    }
 
     // Also compute and draw the adversarial noise (hidden until the user clicks on it)
     let noise = tf.sub(aimg, img).add(0.5).clipByValue(0, 1);  // [Szegedy 14] Intriguing properties of neural networks
@@ -363,7 +329,7 @@ async function generateAdv() {
  */
 function predictAdv() {
   $('#predict-adv').disabled = true;
-  showAdvPrediction(advPrediction, advStatus);
+  showAdvPrediction(advPrediction);
 }
 
 /**
@@ -390,12 +356,11 @@ async function viewImage() {
  * Reset entire dashboard UI when a new image is selected
  */
 function resetOnNewImage() {
+  $('#original').getContext('2d').clearRect(0, 0, 224, 224);
+  $('#image-selector').value = '';
   $('#predict-original').disabled = false;
   $('#predict-original').innerText = 'Run Neural Network';
   $('#prediction').style.display = 'none';
-  $('#prediction-status').innerHTML = '';
-  $('#prediction-status').className = '';
-  $('#prediction-status').style.marginBottom = '9px';
   resetAttack();
   resetAvailableAttacks();
 }
@@ -410,9 +375,6 @@ async function resetAttack() {
   $('#difference').style.display = 'none';
   $('#difference-noise').style.display = 'none';
   $('#prediction-adv').style.display = 'none';
-  $('#prediction-adv-status').innerHTML = '';
-  $('#prediction-adv-status').className = '';
-  $('#prediction-adv-status').style.marginBottom = '9px';
   await drawImg(tf.ones([1, 224, 224, 1]), 'adversarial');
   await drawImg(tf.ones([1, 224, 224, 1]), 'adversarial-noise');
   $('#adversarial').style.display = 'block';
@@ -436,22 +398,18 @@ function resetAvailableAttacks() {
 
   let modelName = $('#select-model').value;
   if (modelName === 'mnist') {
-    let originalLbl = mnistDataset[mnistIdx].ys.argMax(1).dataSync()[0];
-    _resetAvailableAttacks(true, originalLbl, MNIST_TARGETS, MNIST_CLASSES);
+    _resetAvailableAttacks(true, MNIST_TARGETS, MNIST_CLASSES);
   } else if (modelName === 'cifar') {
-    let originalLbl = cifarDataset[cifarIdx].ys.argMax(1).dataSync()[0];
-    _resetAvailableAttacks(true, originalLbl, CIFAR_TARGETS, CIFAR_CLASSES);
+    _resetAvailableAttacks(true, CIFAR_TARGETS, CIFAR_CLASSES);
    }
   else if (modelName === 'gtsrb') {
-    let originalLbl = gtsrbDataset[gtsrbIdx].ys.argMax(1).dataSync()[0];
-    _resetAvailableAttacks(false, originalLbl, GTSRB_TARGETS, GTSRB_CLASSES);
+    _resetAvailableAttacks(false, GTSRB_TARGETS, GTSRB_CLASSES);
   }
   else if (modelName === 'imagenet') {
-    let originalLbl = imagenetYLbls[imagenetIdx];
-    _resetAvailableAttacks(false, originalLbl, IMAGENET_TARGETS, IMAGENET_CLASSES);
+    _resetAvailableAttacks(false, IMAGENET_TARGETS, IMAGENET_CLASSES);
   }
 
-  function _resetAvailableAttacks(jsma, originalLbl, TARGETS, CLASS_NAMES) {
+  function _resetAvailableAttacks(jsma, TARGETS, CLASS_NAMES) {
     let modelName = $('#select-model').value;
     let selectAttack = $('#select-attack');
     let selectTarget = $('#select-target');
@@ -466,24 +424,12 @@ function resetAvailableAttacks() {
 
     // Filter available target classes in dropdown
     if (selectTarget.getAttribute('data-model') === modelName) {
-      // Go through options and disable the current class as a target class
-      selectTarget.options.forEach(option => {
-        if (parseInt(option.value) === originalLbl) { option.disabled = true; }
-        else {option.disabled = false; }
-      });
-      // Reset the selected option if it's now disabled
-      if (parseInt(selectTarget.value) === originalLbl) {
-        selectTarget.options[0].selected = true;
-        if (parseInt(selectTarget.value) === originalLbl) {
-          selectTarget.options[1].selected = true;
-        }
-      }
+
     } else {
       // Rebuild options from scratch (b/c the user chose a new model)
       selectTarget.innerHTML = '';
       TARGETS.forEach(i => {
         let option = new Option(CLASS_NAMES[i], i);
-        if (i === originalLbl) { option.disabled = true; }
         selectTarget.appendChild(option);
       });
       selectTarget.setAttribute('data-model', modelName);
@@ -495,6 +441,9 @@ function resetAvailableAttacks() {
  * Removes the overlay on the left half of the dashboard when the user selects a model
  */
 function removeLeftOverlay() {
+  $('#adversarial-image-overlay').style.display = 'block';
+  $('#adversarial-canvas-overlay').style.display = 'block';
+  $('#adversarial-prediction-overlay').style.display = 'block';
   $('#original-image-overlay').style.display = 'none';
   $('#original-canvas-overlay').style.display = 'none';
   $('#original-prediction-overlay').style.display = 'none';
@@ -565,27 +514,11 @@ function supports32BitWebGL() {
 function showPrediction(msg, status) {
   $('#prediction').innerHTML = msg;
   $('#prediction').style.display = 'block';
-  $('#prediction-status').innerHTML = status.msg;
-  $('#prediction-status').className = status.statusClass;
-  $('#prediction-status').style.marginBottom = '15px';
 }
 
-function showAdvPrediction(msg, status) {
+function showAdvPrediction(msg) {
   $('#prediction-adv').innerHTML = msg;
   $('#prediction-adv').style.display = 'block';
-  $('#prediction-adv-status').innerHTML = status.msg;
-  $('#prediction-adv-status').className = status.statusClass;
-  $('#prediction-adv-status').style.marginBottom = '15px';
-}
-
-let mnistIdx = 0;
-async function showMnist() {
-  await loadingMnist;
-  await drawImg(mnistDataset[mnistIdx].xs, 'original');
-}
-async function showNextMnist() {
-  mnistIdx = (mnistIdx + 1) % mnistDataset.length;
-  await showMnist();
 }
 
 let cifarIdx = 0;
